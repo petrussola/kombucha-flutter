@@ -234,36 +234,7 @@ class _MyHomePageState extends State<MyHomePage> {
                   ),
                 )
               : null,
-      body: _isBottomBannerAdLoaded
-          ? currentPage
-          : Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      'Welcome to the Kombucha Making Toolkit app!',
-                      style: Theme.of(context).textTheme.headline5,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      'Loading content...',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.all(8.0),
-                    child: CircularProgressIndicator(),
-                  )
-                ],
-              ),
-            ),
+      body: currentPage,
     );
   }
 }
