@@ -33,7 +33,7 @@ if (keystorePropertiesFile.exists()) {
 def dartEnvironmentVariables = []
 if (project.hasProperty('dart-defines')) {
     dartEnvironmentVariables = project.property('dart-defines').split(',').collectEntries { entry ->
-            def pair = new String(entry.decodeBase64(), 'UTF-8').split('=')
+            def pair = new String(entry.decodeBase64(), 'UTF-8').split('=', 2)
             [(pair.first()): pair.last()]
         }
 }
@@ -59,10 +59,10 @@ android {
     defaultConfig {
         applicationId "com.kombucha_making_app"
         minSdkVersion 33
-        targetSdk 35
+        targetSdk 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
-        manifestPlaceholders['APPLICATION_ID'] = dartEnvironmentVariables.APPLICATION_ID ?: ""
+        manifestPlaceholders['APPLICATION_ID'] = dartEnvironmentVariables.APPLICATION_ID ?: "ca-app-pub-3940256099942544~3347511713"
     }
 
     signingConfigs {
@@ -92,8 +92,4 @@ android {
 
 flutter {
     source '../..'
-}
-
-dependencies {
-    implementation 'com.google.android.gms:play-services-ads:23.5.0'
 }

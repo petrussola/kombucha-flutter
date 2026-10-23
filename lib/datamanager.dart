@@ -78,7 +78,7 @@ class DataManager {
     }
   ];
 
-  fetchReceipe() {
+  void fetchReceipe() {
     _receipe = [];
     for (var json in _staticData) {
       _receipe?.add(ReceipeStep.fromJson(json));

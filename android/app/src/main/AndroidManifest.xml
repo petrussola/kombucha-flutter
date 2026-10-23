@@ -30,8 +30,7 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-        <!-- TODO: replace with production id -->
-        <!-- https://developers.google.com/admob/android/test-ads -->
+        <!-- APPLICATION_ID comes from the build configuration or uses Google's sample app ID. -->
         <meta-data 
           android:name="com.google.android.gms.ads.APPLICATION_ID"
           android:value="${APPLICATION_ID}" />

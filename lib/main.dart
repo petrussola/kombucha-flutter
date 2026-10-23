@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:kombucha_app/datamanager.dart';
@@ -5,13 +6,26 @@ import 'package:kombucha_app/datamanager.dart';
 import 'package:kombucha_app/pages/calculator_page.dart';
 import 'package:kombucha_app/pages/ingredients_page.dart';
 
-import 'envvariables.dart';
 import 'pages/receipe_page.dart';
+
+const _bottomAdUnitId = String.fromEnvironment('PAGE_BOTTOM_AD_ID');
+const _drawerAdUnitId = String.fromEnvironment('AD_BANNER_DRAWER_ID');
+
+bool get _supportsMobileAds =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+
+String _adUnitId(String configuredId) {
+  if (configuredId.isNotEmpty) return configuredId;
+  if (kReleaseMode) return '';
+  return defaultTargetPlatform == TargetPlatform.iOS
+      ? 'ca-app-pub-3940256099942544/2435281174'
+      : 'ca-app-pub-3940256099942544/9214589741';
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  MobileAds.instance.initialize();
-
   runApp(const MyApp());
 }
 
@@ -46,88 +60,186 @@ class _MyHomePageState extends State<MyHomePage> {
   BannerAd? _adBannerDrawer;
   bool _isBottomBannerAdLoaded = false;
   bool _isDrawerAdLoaded = false;
+  int? _bottomBannerWidth;
+  int _bottomBannerGeneration = 0;
+  bool _adsStarted = false;
+  bool _mobileAdsInitialized = false;
+  bool _privacyOptionsRequired = false;
 
   @override
   void initState() {
     super.initState();
 
-    _loadDrawerAd();
+    if (_supportsMobileAds) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _prepareAds());
+    }
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
 
+    if (_adsStarted) _loadBottomBannerAd();
+  }
+
+  void _prepareAds() {
+    if (!mounted) return;
+    ConsentInformation.instance.requestConsentInfoUpdate(
+      ConsentRequestParameters(),
+      () {
+        _syncAdPermission();
+        _refreshPrivacyOptions();
+        ConsentForm.loadAndShowConsentFormIfRequired((_) {
+          _syncAdPermission();
+          _refreshPrivacyOptions();
+        });
+      },
+      (_) => _syncAdPermission(),
+    );
+  }
+
+  Future<void> _refreshPrivacyOptions() async {
+    try {
+      final status = await ConsentInformation.instance
+          .getPrivacyOptionsRequirementStatus();
+      if (mounted) {
+        setState(() => _privacyOptionsRequired =
+            status == PrivacyOptionsRequirementStatus.required);
+      }
+    } catch (_) {
+      // Keep the current entry point if the status cannot be refreshed.
+    }
+  }
+
+  Future<void> _syncAdPermission() async {
+    bool canRequestAds;
+    try {
+      canRequestAds = await ConsentInformation.instance.canRequestAds();
+    } catch (_) {
+      canRequestAds = false;
+    }
+    if (!mounted || !_supportsMobileAds) return;
+    if (!canRequestAds) {
+      if (_adsStarted) {
+        ++_bottomBannerGeneration;
+        _anchoredAdaptiveAd?.dispose();
+        _adBannerDrawer?.dispose();
+        setState(() {
+          _adsStarted = false;
+          _anchoredAdaptiveAd = null;
+          _adBannerDrawer = null;
+          _isBottomBannerAdLoaded = false;
+          _isDrawerAdLoaded = false;
+          _bottomBannerWidth = null;
+        });
+      }
+      return;
+    }
+    if (_adsStarted) return;
+    _adsStarted = true;
+    if (!_mobileAdsInitialized) {
+      _mobileAdsInitialized = true;
+      MobileAds.instance.initialize();
+    }
+    _loadDrawerAd();
     _loadBottomBannerAd();
   }
 
   Future<void> _loadBottomBannerAd() async {
-    // Get an AnchoredAdaptiveBannerAdSize before loading the ad.
-    final AnchoredAdaptiveBannerAdSize? size =
-        await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
-            MediaQuery.of(context).size.width.truncate());
+    if (!_adsStarted) return;
+    final width = MediaQuery.sizeOf(context).width.truncate();
+    if (width <= 0 || width == _bottomBannerWidth) return;
+    _bottomBannerWidth = width;
+    final generation = ++_bottomBannerGeneration;
+    final oldAd = _anchoredAdaptiveAd;
+    _anchoredAdaptiveAd = null;
+    _isBottomBannerAdLoaded = false;
+    oldAd?.dispose();
 
-    if (size == null) {
+    final adUnitId = _adUnitId(_bottomAdUnitId);
+    if (adUnitId.isEmpty) return;
+
+    final AnchoredAdaptiveBannerAdSize? size =
+        await AdSize.getLargeAnchoredAdaptiveBannerAdSize(width);
+
+    if (!mounted ||
+        !_adsStarted ||
+        generation != _bottomBannerGeneration ||
+        size == null) {
       return;
     }
 
-    _anchoredAdaptiveAd = BannerAd(
-      adUnitId: const String.fromEnvironment(
-        'PAGE_BOTTOM_AD_ID',
-        defaultValue: bannerAdTestId,
-      ),
+    final banner = BannerAd(
+      adUnitId: adUnitId,
       size: size,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (Ad ad) {
+          if (!mounted || !identical(_anchoredAdaptiveAd, ad)) {
+            ad.dispose();
+            return;
+          }
           setState(() {
-            // When the ad is loaded, get the ad size and use it to set
-            // the height of the ad container.
-            _anchoredAdaptiveAd = ad as BannerAd;
             _isBottomBannerAdLoaded = true;
           });
         },
         onAdFailedToLoad: (Ad ad, LoadAdError error) {
           ad.dispose();
-
-          _isBottomBannerAdLoaded = true;
+          if (mounted && identical(_anchoredAdaptiveAd, ad)) {
+            setState(() {
+              _anchoredAdaptiveAd = null;
+              _isBottomBannerAdLoaded = false;
+            });
+          }
         },
       ),
     );
-
-    _anchoredAdaptiveAd!.load();
-
-    return;
+    _anchoredAdaptiveAd = banner;
+    banner.load();
   }
 
-  _loadDrawerAd() {
-    _adBannerDrawer = BannerAd(
-      adUnitId: const String.fromEnvironment("AD_BANNER_DRAWER_ID",
-          defaultValue: bannerAdTestId),
+  void _loadDrawerAd() {
+    if (!_adsStarted) return;
+    final adUnitId = _adUnitId(_drawerAdUnitId);
+    if (adUnitId.isEmpty) return;
+    final banner = BannerAd(
+      adUnitId: adUnitId,
       size: AdSize.mediumRectangle,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (Ad ad) {
+          if (!mounted || !identical(_adBannerDrawer, ad)) {
+            ad.dispose();
+            return;
+          }
           setState(
             () {
-              // When the ad is loaded, get the ad size and use it to set
-              // the height of the ad container.
-              _adBannerDrawer = ad as BannerAd;
               _isDrawerAdLoaded = true;
             },
           );
         },
         onAdFailedToLoad: (Ad ad, LoadAdError error) {
           ad.dispose();
-
-          _isDrawerAdLoaded = true;
+          if (mounted && identical(_adBannerDrawer, ad)) {
+            setState(() {
+              _adBannerDrawer = null;
+              _isDrawerAdLoaded = false;
+            });
+          }
         },
       ),
     );
 
-    _adBannerDrawer?.load();
+    _adBannerDrawer = banner;
+    banner.load();
+  }
 
-    return;
+  @override
+  void dispose() {
+    ++_bottomBannerGeneration;
+    _anchoredAdaptiveAd?.dispose();
+    _adBannerDrawer?.dispose();
+    super.dispose();
   }
 
   @override
@@ -164,7 +276,8 @@ class _MyHomePageState extends State<MyHomePage> {
         title: Text(pageTitle),
       ),
       drawer: Drawer(
-        child: Column(
+        child: ListView(
+          padding: EdgeInsets.zero,
           children: [
             DrawerHeader(
               decoration: const BoxDecoration(
@@ -181,36 +294,42 @@ class _MyHomePageState extends State<MyHomePage> {
                 ),
               ),
             ),
-            Expanded(
-              child: Column(
-                children: [
-                  DrawerListItem(
-                    index: 0,
-                    icon: Icons.restaurant,
-                    name: "Ingredients",
-                    onTap: (index) => {
-                      tapHandler(index, context),
-                    },
-                  ),
-                  DrawerListItem(
-                    index: 1,
-                    icon: Icons.menu_book,
-                    name: "Receipe",
-                    onTap: (index) => {
-                      tapHandler(index, context),
-                    },
-                  ),
-                  DrawerListItem(
-                    index: 2,
-                    icon: Icons.calculate,
-                    name: "Proportions",
-                    onTap: (index) => {
-                      tapHandler(index, context),
-                    },
-                  ),
-                ],
-              ),
+            DrawerListItem(
+              index: 0,
+              icon: Icons.restaurant,
+              name: "Ingredients",
+              onTap: (index) => {
+                tapHandler(index, context),
+              },
             ),
+            DrawerListItem(
+              index: 1,
+              icon: Icons.menu_book,
+              name: "Receipe",
+              onTap: (index) => {
+                tapHandler(index, context),
+              },
+            ),
+            DrawerListItem(
+              index: 2,
+              icon: Icons.calculate,
+              name: "Proportions",
+              onTap: (index) => {
+                tapHandler(index, context),
+              },
+            ),
+            if (_privacyOptionsRequired)
+              ListTile(
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text('Privacy options'),
+                onTap: () {
+                  Navigator.pop(context);
+                  ConsentForm.showPrivacyOptionsForm((_) {
+                    _syncAdPermission();
+                    _refreshPrivacyOptions();
+                  });
+                },
+              ),
             if (_adBannerDrawer != null && _isDrawerAdLoaded)
               Container(
                 alignment: Alignment.center,

@@ -26,7 +26,7 @@ class _CalculatorPageState extends State<CalculatorPage> {
   };
 
   void onSelectLitres(double value) {
-    setState(() => {_litres = value});
+    setState(() => _litres = value);
   }
 
   @override
