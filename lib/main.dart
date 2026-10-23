@@ -16,7 +16,9 @@ const _drawerAdUnitId = String.fromEnvironment('AD_BANNER_DRAWER_ID');
 bool get _supportsMobileAds =>
     !kIsWeb &&
     (defaultTargetPlatform == TargetPlatform.android ||
-        defaultTargetPlatform == TargetPlatform.iOS);
+        defaultTargetPlatform == TargetPlatform.iOS) &&
+    (_adUnitId(_bottomAdUnitId).isNotEmpty ||
+        _adUnitId(_drawerAdUnitId).isNotEmpty);
 
 String _adUnitId(String configuredId) {
   if (configuredId.isNotEmpty) return configuredId;
