@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
@@ -62,7 +64,12 @@ class _MyHomePageState extends State<MyHomePage> {
   bool _isDrawerAdLoaded = false;
   int? _bottomBannerWidth;
   int _bottomBannerGeneration = 0;
+  Timer? _bottomBannerRetry;
+  Timer? _drawerRetry;
+  int _bottomBannerFailures = 0;
+  int _drawerFailures = 0;
   bool _adsStarted = false;
+  bool _adsStarting = false;
   bool _mobileAdsInitialized = false;
   bool _privacyOptionsRequired = false;
 
@@ -122,6 +129,10 @@ class _MyHomePageState extends State<MyHomePage> {
     if (!canRequestAds) {
       if (_adsStarted) {
         ++_bottomBannerGeneration;
+        _bottomBannerRetry?.cancel();
+        _drawerRetry?.cancel();
+        _bottomBannerFailures = 0;
+        _drawerFailures = 0;
         _anchoredAdaptiveAd?.dispose();
         _adBannerDrawer?.dispose();
         setState(() {
@@ -135,12 +146,26 @@ class _MyHomePageState extends State<MyHomePage> {
       }
       return;
     }
-    if (_adsStarted) return;
-    _adsStarted = true;
+    if (_adsStarted || _adsStarting) return;
+    _adsStarting = true;
     if (!_mobileAdsInitialized) {
-      _mobileAdsInitialized = true;
-      MobileAds.instance.initialize();
+      try {
+        await MobileAds.instance.initialize();
+        _mobileAdsInitialized = true;
+      } catch (_) {
+        _adsStarting = false;
+        return;
+      }
     }
+    bool stillAllowed;
+    try {
+      stillAllowed = await ConsentInformation.instance.canRequestAds();
+    } catch (_) {
+      stillAllowed = false;
+    }
+    _adsStarting = false;
+    if (!mounted || !stillAllowed) return;
+    _adsStarted = true;
     _loadDrawerAd();
     _loadBottomBannerAd();
   }
@@ -166,6 +191,10 @@ class _MyHomePageState extends State<MyHomePage> {
         !_adsStarted ||
         generation != _bottomBannerGeneration ||
         size == null) {
+      if (mounted && generation == _bottomBannerGeneration && size == null) {
+        _bottomBannerWidth = null;
+        _retryBottomBanner();
+      }
       return;
     }
 
@@ -182,6 +211,7 @@ class _MyHomePageState extends State<MyHomePage> {
           setState(() {
             _isBottomBannerAdLoaded = true;
           });
+          _bottomBannerFailures = 0;
         },
         onAdFailedToLoad: (Ad ad, LoadAdError error) {
           ad.dispose();
@@ -189,13 +219,27 @@ class _MyHomePageState extends State<MyHomePage> {
             setState(() {
               _anchoredAdaptiveAd = null;
               _isBottomBannerAdLoaded = false;
+              _bottomBannerWidth = null;
             });
+            _retryBottomBanner();
           }
         },
       ),
     );
     _anchoredAdaptiveAd = banner;
     banner.load();
+  }
+
+  void _retryBottomBanner() {
+    if (!_adsStarted || _bottomBannerFailures >= 3) return;
+    _bottomBannerFailures++;
+    _bottomBannerRetry?.cancel();
+    _bottomBannerRetry = Timer(
+      Duration(seconds: 30 * _bottomBannerFailures),
+      () {
+        if (mounted && _adsStarted) _loadBottomBannerAd();
+      },
+    );
   }
 
   void _loadDrawerAd() {
@@ -217,6 +261,7 @@ class _MyHomePageState extends State<MyHomePage> {
               _isDrawerAdLoaded = true;
             },
           );
+          _drawerFailures = 0;
         },
         onAdFailedToLoad: (Ad ad, LoadAdError error) {
           ad.dispose();
@@ -225,6 +270,7 @@ class _MyHomePageState extends State<MyHomePage> {
               _adBannerDrawer = null;
               _isDrawerAdLoaded = false;
             });
+            _retryDrawerAd();
           }
         },
       ),
@@ -234,9 +280,20 @@ class _MyHomePageState extends State<MyHomePage> {
     banner.load();
   }
 
+  void _retryDrawerAd() {
+    if (!_adsStarted || _drawerFailures >= 3) return;
+    _drawerFailures++;
+    _drawerRetry?.cancel();
+    _drawerRetry = Timer(Duration(seconds: 30 * _drawerFailures), () {
+      if (mounted && _adsStarted) _loadDrawerAd();
+    });
+  }
+
   @override
   void dispose() {
     ++_bottomBannerGeneration;
+    _bottomBannerRetry?.cancel();
+    _drawerRetry?.cancel();
     _anchoredAdaptiveAd?.dispose();
     _adBannerDrawer?.dispose();
     super.dispose();
